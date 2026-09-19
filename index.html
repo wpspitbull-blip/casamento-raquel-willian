@@ -1061,19 +1061,24 @@ function recomendacoesPorCategoria(categoria){
 }
 function mensagemConfirmacaoWhatsApp(registro){
   const nome = registro.nome || "Convidado(a)";
-  const categoria = registro.categoria || "Convidado(a)";
   return [
     `Olá, ${nome}! 💚`,
     "",
-    "✅ Cadastro confirmado!",
-    "",
     "Sua presença no casamento de Raquel & Willian foi confirmada. Será uma alegria compartilhar esse momento tão especial com você.",
     "",
-    `Identificação no casamento: ${categoria}.`,
+    "📅 Data: 20/11/2026",
     "",
-    ...recomendacoesPorCategoria(categoria),
+    "🕢 Horário: 19h30",
     "",
-    "Sua atenção às orientações é muito importante para que a organização da cerimônia e da recepção aconteça com tranquilidade e carinho. Esperamos por você! 💍✨"
+    "📍 Local: Café Central — Rua XV de Novembro, 15, Centro, Santos/SP",
+    "",
+    "🎁 *LISTA DE PRESENTES:* https://wpspitbull-blip.github.io/casamento-raquel-willian/#presentes",
+    "",
+    "Orientações do casamento no site, consulte.",
+    "",
+    "Sua atenção às orientações é muito importante para que a organização da cerimônia e da recepção aconteça com tranquilidade e carinho.",
+    "",
+    "Esperamos por você! 💍✨"
   ].join("\n");
 }
 function linkWhatsAppConfirmacao(registro){
