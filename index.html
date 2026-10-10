@@ -530,6 +530,12 @@ footer .script{
 }
 </style>
 
+<style>
+.database-access{background:transparent;border:1px solid var(--sage);border-radius:999px;padding:8px 12px;color:var(--ink);cursor:pointer;font:inherit;font-size:11px}
+#reportStatus{display:none}
+#reportStatus.ok,#reportStatus.err{display:block}
+.report-scroll{overflow-x:auto}
+</style>
 </head>
 <body>
 <!-- VERSAO CONFIRMACAO INDIVIDUAL 2 -->
@@ -540,6 +546,7 @@ footer .script{
   <a href="#confirmacao">Confirmação</a>
   <a href="#orientacoes">Orientações</a>
   <a href="#presentes">Presentes</a>
+  <button type="button" id="databaseAccess" class="database-access" aria-label="Acessar banco de confirmações" title="Banco de confirmações">🔒 Banco de confirmações</button>
 </nav>
 
 <header class="hero" id="inicio">
@@ -660,18 +667,22 @@ footer .script{
       </label>
       <button type="button" class="btn btn-primary" id="openReport">Abrir relatório</button>
     </div>
-    <div id="reportStatus" class="status"></div>
+    <div id="reportStatus" class="status" role="status" aria-live="polite"></div>
+    <p class="muted">Se o banco estiver pausado, abra o painel do serviço, entre na sua conta Supabase e escolha restaurar o projeto. Depois volte e tente novamente.</p>
+    <a class="btn btn-secondary" href="https://supabase.com/dashboard/project/txhumrcxxamefmygjyff" target="_blank" rel="noopener noreferrer">Abrir painel de reativação ↗</a>
   </div>
   <div id="printArea" style="display:none">
     <h2>Raquel &amp; Willian</h2>
     <p><strong>Lista central de convidados confirmados — 20/11/2026</strong></p>
     <p id="reportCount"></p>
-    <table class="report-table">
+    <div class="report-scroll"><table class="report-table">
       <thead><tr><th>Nome completo</th><th>Idade</th><th>CPF</th><th>Telefone</th><th>Identificação</th><th>Confirmação enviada</th><th class="no-print">Ações</th></tr></thead>
       <tbody id="reportBody"></tbody>
     </table>
+    </div>
     <p id="reportEmpty" class="report-empty"></p>
     <div class="no-print" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+      <button type="button" class="btn btn-secondary" id="reconnectDatabase">↻ Acionar banco / atualizar lista</button>
       <button type="button" class="btn btn-primary" id="printReport">Gerar relatório para impressão</button>
       <button type="button" class="btn" id="closeReport">Fechar relatório</button>
     </div>
@@ -834,24 +845,32 @@ function showStatus(msg, type="ok"){
   el.textContent=msg;
 }
 
+function databaseErrorMessage(err){
+  if(err && err.name === "AbortError") return "O banco demorou para responder. Tente novamente em alguns instantes. Seus dados continuam no formulário.";
+  if(err && err.unavailable) return "Banco de confirmações temporariamente indisponível. Pode estar pausado ou em reativação. Tente novamente em alguns minutos; a administração pode reativá-lo pelo ícone Banco de confirmações.";
+  if(/senha|password/i.test(String(err && err.message))) return "Senha administrativa incorreta.";
+  return "Não foi possível acessar o banco de confirmações. Verifique sua conexão e tente novamente.";
+}
 async function supabaseRpc(functionName, payload){
-  const resp = await fetch(`${CONFIG.supabaseUrl}/rest/v1/rpc/${functionName}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": CONFIG.supabaseKey,
-      "Authorization": `Bearer ${CONFIG.supabaseKey}`
-    },
-    body: JSON.stringify(payload)
-  });
-  const raw = await resp.text();
-  let data = null;
-  try{ data = raw ? JSON.parse(raw) : null; }catch(_){ data = raw; }
-  if(!resp.ok){
-    const msg = (data && (data.message || data.error || data.hint)) || "Não foi possível acessar o banco de confirmações.";
-    throw new Error(msg);
-  }
-  return data;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try{
+    const resp = await fetch(`${CONFIG.supabaseUrl}/rest/v1/rpc/${functionName}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "apikey": CONFIG.supabaseKey},
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    const raw = await resp.text();
+    let data = null;
+    try{ data = raw ? JSON.parse(raw) : null; }catch(_){ data = raw; }
+    if(!resp.ok){
+      const err = new Error((data && (data.message || data.error || data.hint)) || "Não foi possível acessar o banco de confirmações.");
+      err.unavailable = [502,503,504,521,522,530].includes(resp.status);
+      throw err;
+    }
+    return data;
+  }finally{ clearTimeout(timer); }
 }
 
 $("#rsvpForm").addEventListener("submit", async (e)=>{
@@ -876,7 +895,7 @@ $("#rsvpForm").addEventListener("submit", async (e)=>{
     showStatus("Confirmação registrada com sucesso. Obrigado!", "ok");
   }catch(err){
     console.error(err);
-    showStatus("Não foi possível registrar a confirmação agora. Verifique sua internet e tente novamente.", "err");
+    showStatus(databaseErrorMessage(err), "err");
   }finally{
     if(button){ button.disabled = false; button.textContent = oldText; }
   }
@@ -1237,20 +1256,25 @@ if(openReportBtn){
   openReportBtn.addEventListener("click", async () => {
     const pw = document.getElementById("reportPassword").value;
     const status = document.getElementById("reportStatus");
-    if(!pw){ status.textContent = "Digite a senha do relatório."; return; }
+    if(!pw){ status.className = "status err"; status.textContent = "Digite a senha do relatório."; return; }
+    status.className = "status ok";
     status.textContent = "Carregando confirmações...";
     openReportBtn.disabled = true;
     try{
       reportCache = await fetchCentralReport(pw);
       lastReportPassword = pw;
-      status.textContent = "";
+      status.className = "status ok";
+      status.textContent = "Banco conectado. Lista atualizada com sucesso.";
       renderReport(reportCache);
       document.getElementById("printArea").style.display = "block";
     }catch(err){
       console.error(err);
-      status.textContent = String(err.message || "Erro ao carregar o relatório.").includes("Senha")
-        ? "Senha incorreta."
-        : "Não foi possível carregar o relatório. Verifique sua internet e tente novamente.";
+      lastReportPassword = "";
+      reportCache = [];
+      document.getElementById("reportBody").innerHTML = "";
+      document.getElementById("printArea").style.display = "none";
+      status.className = "status err";
+      status.textContent = databaseErrorMessage(err);
     }finally{
       openReportBtn.disabled = false;
     }
@@ -1362,6 +1386,33 @@ if(closeReportBtn) closeReportBtn.addEventListener("click", () => {
   document.getElementById("reportPassword").value = "";
   lastReportPassword = "";
   reportCache = [];
+  document.getElementById("reportBody").innerHTML = "";
+  document.getElementById("reportStatus").className = "status";
+  document.getElementById("reportStatus").textContent = "";
+});
+
+document.getElementById("databaseAccess").addEventListener("click", () => {
+  document.getElementById("adminReport").scrollIntoView({behavior:"smooth", block:"center"});
+  document.getElementById("reportPassword").focus({preventScroll:true});
+});
+document.getElementById("reportPassword").addEventListener("keydown", (event) => {
+  if(event.key === "Enter") { event.preventDefault(); if(!openReportBtn.disabled) openReportBtn.click(); }
+});
+document.getElementById("reconnectDatabase").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const status = document.getElementById("reportStatus");
+  if(!lastReportPassword) { document.getElementById("reportPassword").focus(); return; }
+  button.disabled = true;
+  status.className = "status ok";
+  status.textContent = "Acionando banco de confirmações...";
+  try {
+    reportCache = await fetchCentralReport(lastReportPassword);
+    renderReport(reportCache);
+    status.textContent = "Banco conectado. Lista atualizada com sucesso.";
+  } catch(err) {
+    status.className = "status err";
+    status.textContent = databaseErrorMessage(err);
+  } finally { button.disabled = false; }
 });
 
 </script>
